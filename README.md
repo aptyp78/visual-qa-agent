@@ -18,7 +18,7 @@
 ```bash
 # 1. Клонируем и устанавливаем
 cd ~/ai-projects
-git clone https://github.com/your-repo/visual-qa-agent.git
+git clone https://github.com/aptyp78/visual-qa-agent.git
 cd visual-qa-agent
 npm install
 npx playwright install chromium
