@@ -1,6 +1,6 @@
 {
   "name": "visual-qa-agent",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "Автономный агент для визуальной проверки веб-интерфейсов с AI-анализом",
   "main": "src/index.js",
   "type": "module",

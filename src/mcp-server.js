@@ -116,6 +116,11 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
                             description: 'Также проверить в тёмном режиме (prefers-color-scheme: dark)',
                             default: false,
                         },
+                        capture_console: {
+                            type: 'boolean',
+                            description: 'Захватить логи консоли браузера (JS ошибки, network failures)',
+                            default: false,
+                        },
                     },
                     required: ['url'],
                 },
@@ -258,6 +263,45 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
                     required: ['urls'],
                 },
             },
+            {
+                name: 'visual_qa_console',
+                description: `Захват логов консоли браузера (F12 DevTools Console).
+
+Перехватывает и анализирует:
+- console.log/warn/error/info сообщения
+- Необработанные JavaScript ошибки (uncaught exceptions)
+- Сетевые ошибки (failed requests, 4xx/5xx responses)
+- Security warnings (mixed content и т.д.)
+- Performance метрики (FCP, load time)
+
+Полезно для обнаружения скрытых проблем, которые не видны визуально.`,
+                inputSchema: {
+                    type: 'object',
+                    properties: {
+                        url: {
+                            type: 'string',
+                            description: 'URL страницы для проверки',
+                        },
+                        wait_time: {
+                            type: 'number',
+                            description: 'Время ожидания после загрузки для сбора runtime ошибок (мс)',
+                            default: 3000,
+                        },
+                        include_network: {
+                            type: 'boolean',
+                            description: 'Включить сетевые ошибки в отчёт',
+                            default: true,
+                        },
+                        browser: {
+                            type: 'string',
+                            enum: ['chromium', 'firefox', 'webkit'],
+                            description: 'Браузер для проверки',
+                            default: 'chromium',
+                        },
+                    },
+                    required: ['url'],
+                },
+            },
         ],
     };
 });
@@ -275,9 +319,63 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 const aiAnalysis = args.ai_analysis || false;
                 const compareBaseline = args.compare_baseline || false;
                 const checkDarkMode = args.check_dark_mode || false;
+                const captureConsole = args.capture_console || false;
 
                 // Проверка страницы (теперь возвращает структурированные issues с fix-ами)
                 const results = await agent.checkPage(url, { profile, checkDarkMode });
+
+                // Захват консоли если включён
+                let consoleData = null;
+                if (captureConsole) {
+                    console.log(`🔍 Захват консоли браузера...`);
+                    consoleData = await agent.captureConsole(url, {
+                        waitTime: 3000,
+                        includeNetwork: true,
+                        browserType: 'chromium'
+                    });
+                    results.console = consoleData;
+
+                    // Добавляем критические ошибки консоли к issues
+                    if (consoleData.jsErrors.length > 0) {
+                        for (const jsError of consoleData.jsErrors) {
+                            results.issues.push({
+                                id: `js_error_${Date.now()}`,
+                                type: 'javascript',
+                                severity: 'critical',
+                                title: 'JavaScript Error',
+                                description: jsError.message,
+                                element: null,
+                                fix: {
+                                    action: 'fix_js_error',
+                                    suggestion: 'Исправьте JavaScript ошибку в коде',
+                                    details: jsError.stack
+                                },
+                                blocks_release: true
+                            });
+                        }
+                    }
+
+                    // Добавляем network ошибки как warnings
+                    if (consoleData.networkErrors.length > 0) {
+                        const failedResources = consoleData.networkErrors.filter(e => e.status >= 500 || e.failure);
+                        if (failedResources.length > 0) {
+                            results.issues.push({
+                                id: `network_errors_${Date.now()}`,
+                                type: 'network',
+                                severity: failedResources.some(e => e.status >= 500) ? 'critical' : 'warning',
+                                title: `Network Errors (${failedResources.length})`,
+                                description: `Найдено ${failedResources.length} сетевых ошибок`,
+                                element: null,
+                                fix: {
+                                    action: 'fix_network',
+                                    suggestion: 'Проверьте доступность ресурсов',
+                                    urls: failedResources.map(e => e.url)
+                                },
+                                blocks_release: failedResources.some(e => e.status >= 500)
+                            });
+                        }
+                    }
+                }
 
                 // AI-анализ если включён
                 if (aiAnalysis) {
@@ -338,6 +436,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                     profile,
                     summary: results.summary,
                     action_summary: results.action_summary,
+                    console_summary: consoleData ? {
+                        total_logs: consoleData.summary.total_logs,
+                        errors: consoleData.summary.errors,
+                        warnings: consoleData.summary.warnings,
+                        network_errors: consoleData.summary.network_errors,
+                        has_critical: consoleData.summary.has_critical,
+                        performance: consoleData.performance
+                    } : null,
                     // Структурированные проблемы с конкретными fix-ами
                     issues: results.issues.map(issue => ({
                         id: issue.id,
@@ -411,7 +517,16 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 - 📋 Всего проблем: ${results.issues.length}
 
 ${results.action_summary ? `### Действия\n${results.action_summary.action_required}\n` : ''}
-${issuesList}
+${consoleData ? `### 🔍 Консоль браузера
+| Метрика | Значение |
+|---------|----------|
+| JS ошибок | ${consoleData.summary.errors} |
+| Предупреждений | ${consoleData.summary.warnings} |
+| Сетевых ошибок | ${consoleData.summary.network_errors} |
+| FCP | ${consoleData.performance?.firstContentfulPaint?.toFixed(0) || 'N/A'} ms |
+| Load | ${consoleData.performance?.loadComplete?.toFixed(0) || 'N/A'} ms |
+
+` : ''}${issuesList}
 ### Проверки по устройствам
 ${machineReadableResponse.checks.map(c =>
     `- **${c.device}** (${c.browser}): ${c.status}${c.issues_count > 0 ? ` - ${c.issues_count} проблем` : ''}${c.diffPercent !== undefined ? ` - diff: ${c.diffPercent}%` : ''}`
@@ -772,6 +887,134 @@ ${checkDarkMode ? '**Dark Mode:** включён' : ''}
                 }
 
                 output += `\n---\n**Машиночитаемый JSON:**\n\`\`\`json\n${JSON.stringify(aggregated, null, 2)}\n\`\`\``;
+
+                return {
+                    content: [{ type: 'text', text: output }],
+                };
+            }
+
+            case 'visual_qa_console': {
+                const agent = await getAgent();
+                const url = args.url;
+                const waitTime = args.wait_time || 3000;
+                const includeNetwork = args.include_network !== false;
+                const browserType = args.browser || 'chromium';
+
+                console.log(`🔍 Захват консоли браузера: ${url}...`);
+
+                const result = await agent.captureConsole(url, {
+                    waitTime,
+                    includeNetwork,
+                    browserType
+                });
+
+                // Формируем текстовый отчёт
+                const hasErrors = result.summary.errors > 0;
+                const hasNetworkErrors = result.summary.network_errors > 0;
+                const statusIcon = result.summary.has_critical ? '🛑' :
+                                  hasErrors ? '❌' :
+                                  hasNetworkErrors ? '⚠️' : '✅';
+
+                let output = `## ${statusIcon} Отчёт консоли браузера
+
+**URL:** ${url}
+**Браузер:** ${browserType}
+**Статус страницы:** ${result.pageInfo.status} ${result.pageInfo.ok ? '(OK)' : '(ERROR)'}
+**Заголовок:** ${result.pageInfo.title}
+
+### 📊 Сводка
+
+| Метрика | Значение |
+|---------|----------|
+| Всего логов | ${result.summary.total_logs} |
+| 🔴 Ошибок | ${result.summary.errors} |
+| 🟡 Предупреждений | ${result.summary.warnings} |
+| 🌐 Сетевых ошибок | ${result.summary.network_errors} |
+| 🛑 Критические | ${result.summary.has_critical ? 'Да' : 'Нет'} |
+
+### ⚡ Performance
+
+| Метрика | Значение |
+|---------|----------|
+| DOM Content Loaded | ${result.performance.domContentLoaded?.toFixed(0) || 'N/A'} ms |
+| Page Load Complete | ${result.performance.loadComplete?.toFixed(0) || 'N/A'} ms |
+| First Paint | ${result.performance.firstPaint?.toFixed(0) || 'N/A'} ms |
+| First Contentful Paint | ${result.performance.firstContentfulPaint?.toFixed(0) || 'N/A'} ms |
+| Transfer Size | ${result.performance.transferSize ? (result.performance.transferSize / 1024).toFixed(1) + ' KB' : 'N/A'} |
+
+`;
+
+                // JavaScript ошибки
+                if (result.jsErrors.length > 0) {
+                    output += `### 🔴 JavaScript ошибки (${result.jsErrors.length})\n\n`;
+                    for (const err of result.jsErrors) {
+                        output += `#### ❌ ${err.message.substring(0, 100)}${err.message.length > 100 ? '...' : ''}\n`;
+                        output += `\`\`\`\n${err.stack?.substring(0, 500) || 'No stack trace'}\n\`\`\`\n\n`;
+                    }
+                }
+
+                // Console errors
+                if (result.console.errors.length > 0) {
+                    output += `### 🔴 Console Errors (${result.console.errors.length})\n\n`;
+                    for (const log of result.console.errors.slice(0, 10)) {
+                        output += `- \`${log.text.substring(0, 200)}${log.text.length > 200 ? '...' : ''}\`\n`;
+                        if (log.url) output += `  - Файл: ${log.url}:${log.line}\n`;
+                    }
+                    if (result.console.errors.length > 10) {
+                        output += `\n*...и ещё ${result.console.errors.length - 10} ошибок*\n`;
+                    }
+                    output += '\n';
+                }
+
+                // Console warnings
+                if (result.console.warnings.length > 0) {
+                    output += `### 🟡 Console Warnings (${result.console.warnings.length})\n\n`;
+                    for (const log of result.console.warnings.slice(0, 10)) {
+                        output += `- \`${log.text.substring(0, 200)}${log.text.length > 200 ? '...' : ''}\`\n`;
+                    }
+                    if (result.console.warnings.length > 10) {
+                        output += `\n*...и ещё ${result.console.warnings.length - 10} предупреждений*\n`;
+                    }
+                    output += '\n';
+                }
+
+                // Network errors
+                if (result.networkErrors.length > 0) {
+                    output += `### 🌐 Сетевые ошибки (${result.networkErrors.length})\n\n`;
+                    output += '| URL | Статус | Тип |\n';
+                    output += '|-----|--------|-----|\n';
+                    for (const err of result.networkErrors.slice(0, 15)) {
+                        const shortUrl = err.url.length > 60 ? err.url.substring(0, 60) + '...' : err.url;
+                        const status = err.status || err.failure;
+                        output += `| ${shortUrl} | ${status} | ${err.resourceType} |\n`;
+                    }
+                    if (result.networkErrors.length > 15) {
+                        output += `\n*...и ещё ${result.networkErrors.length - 15} ошибок*\n`;
+                    }
+                    output += '\n';
+                }
+
+                // Security warnings
+                if (result.securityWarnings.length > 0) {
+                    output += `### 🔒 Security Warnings (${result.securityWarnings.length})\n\n`;
+                    for (const warn of result.securityWarnings) {
+                        output += `- ⚠️ ${warn.message}\n`;
+                    }
+                    output += '\n';
+                }
+
+                // Console info/log (показываем только если мало)
+                if (result.console.info.length > 0 && result.console.info.length <= 20) {
+                    output += `### ℹ️ Console Info/Log (${result.console.info.length})\n\n`;
+                    for (const log of result.console.info.slice(0, 10)) {
+                        output += `- \`${log.text.substring(0, 100)}${log.text.length > 100 ? '...' : ''}\`\n`;
+                    }
+                    output += '\n';
+                } else if (result.console.info.length > 20) {
+                    output += `### ℹ️ Console Info/Log\n\n*${result.console.info.length} записей (слишком много для отображения)*\n\n`;
+                }
+
+                output += `---\n**Машиночитаемый JSON:**\n\`\`\`json\n${JSON.stringify(result, null, 2)}\n\`\`\``;
 
                 return {
                     content: [{ type: 'text', text: output }],

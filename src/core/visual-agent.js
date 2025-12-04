@@ -157,6 +157,188 @@ export class VisualQAAgent {
     }
 
     /**
+     * Захват логов консоли браузера (F12 Console)
+     * Перехватывает: console.log/warn/error/info, JS ошибки, network failures
+     * @param {string} url - URL страницы
+     * @param {Object} options - опции
+     * @param {number} options.waitTime - время ожидания после загрузки (мс)
+     * @param {boolean} options.includeNetwork - включить сетевые ошибки
+     * @param {string} options.browserType - тип браузера
+     */
+    async captureConsole(url, options = {}) {
+        const {
+            waitTime = 3000,
+            includeNetwork = true,
+            browserType = 'chromium'
+        } = options;
+
+        // Валидация URL
+        validateUrl(url);
+
+        const browser = await this.browsers[browserType].launch({ headless: true });
+        const context = await browser.newContext();
+        const page = await context.newPage();
+
+        // Собираем все события консоли
+        const consoleLogs = [];
+        const jsErrors = [];
+        const networkErrors = [];
+        const securityWarnings = [];
+
+        // Перехват console.log/warn/error/info
+        page.on('console', msg => {
+            const type = msg.type();
+            const text = msg.text();
+            const location = msg.location();
+
+            consoleLogs.push({
+                type: type,
+                text: text,
+                url: location.url || '',
+                line: location.lineNumber,
+                column: location.columnNumber,
+                timestamp: new Date().toISOString()
+            });
+        });
+
+        // Перехват необработанных JS ошибок
+        page.on('pageerror', error => {
+            jsErrors.push({
+                message: error.message,
+                stack: error.stack,
+                timestamp: new Date().toISOString()
+            });
+        });
+
+        // Перехват ошибок запросов (network failures)
+        if (includeNetwork) {
+            page.on('requestfailed', request => {
+                networkErrors.push({
+                    url: request.url(),
+                    method: request.method(),
+                    failure: request.failure()?.errorText || 'Unknown error',
+                    resourceType: request.resourceType(),
+                    timestamp: new Date().toISOString()
+                });
+            });
+
+            // Перехват ответов с ошибками (4xx, 5xx)
+            page.on('response', response => {
+                const status = response.status();
+                if (status >= 400) {
+                    networkErrors.push({
+                        url: response.url(),
+                        status: status,
+                        statusText: response.statusText(),
+                        resourceType: response.request().resourceType(),
+                        timestamp: new Date().toISOString()
+                    });
+                }
+            });
+        }
+
+        // Перехват security warnings (mixed content и т.д.)
+        context.on('console', msg => {
+            if (msg.text().toLowerCase().includes('security') ||
+                msg.text().toLowerCase().includes('mixed content') ||
+                msg.text().toLowerCase().includes('insecure')) {
+                securityWarnings.push({
+                    message: msg.text(),
+                    timestamp: new Date().toISOString()
+                });
+            }
+        });
+
+        try {
+            // Переходим на страницу
+            const response = await page.goto(url, {
+                waitUntil: 'networkidle',
+                timeout: 30000
+            });
+
+            // Ждём указанное время для сбора runtime ошибок
+            await page.waitForTimeout(waitTime);
+
+            // Получаем performance metrics
+            const performanceMetrics = await page.evaluate(() => {
+                const perf = performance.getEntriesByType('navigation')[0];
+                const paint = performance.getEntriesByType('paint');
+
+                return {
+                    // Время загрузки
+                    domContentLoaded: perf?.domContentLoadedEventEnd - perf?.startTime,
+                    loadComplete: perf?.loadEventEnd - perf?.startTime,
+                    // First Paint / First Contentful Paint
+                    firstPaint: paint.find(p => p.name === 'first-paint')?.startTime,
+                    firstContentfulPaint: paint.find(p => p.name === 'first-contentful-paint')?.startTime,
+                    // Размеры
+                    transferSize: perf?.transferSize,
+                    encodedBodySize: perf?.encodedBodySize,
+                    decodedBodySize: perf?.decodedBodySize
+                };
+            });
+
+            // Получаем deprecated API warnings
+            const deprecationWarnings = await page.evaluate(() => {
+                // Проверяем известные deprecated features
+                const warnings = [];
+
+                if (typeof document.all !== 'undefined') {
+                    warnings.push('document.all is deprecated');
+                }
+
+                return warnings;
+            });
+
+            // Классифицируем логи по severity
+            const classify = (logs) => {
+                return {
+                    errors: logs.filter(l => l.type === 'error'),
+                    warnings: logs.filter(l => l.type === 'warning'),
+                    info: logs.filter(l => l.type === 'info' || l.type === 'log'),
+                    debug: logs.filter(l => l.type === 'debug'),
+                    other: logs.filter(l => !['error', 'warning', 'info', 'log', 'debug'].includes(l.type))
+                };
+            };
+
+            const classified = classify(consoleLogs);
+
+            // Формируем результат
+            const result = {
+                url,
+                browserType,
+                timestamp: new Date().toISOString(),
+                pageInfo: {
+                    title: await page.title(),
+                    status: response?.status(),
+                    ok: response?.ok()
+                },
+                summary: {
+                    total_logs: consoleLogs.length,
+                    errors: classified.errors.length + jsErrors.length,
+                    warnings: classified.warnings.length + securityWarnings.length,
+                    network_errors: networkErrors.length,
+                    has_critical: jsErrors.length > 0 || networkErrors.some(e => e.status >= 500)
+                },
+                console: {
+                    all: consoleLogs,
+                    ...classified
+                },
+                jsErrors,
+                networkErrors,
+                securityWarnings,
+                deprecationWarnings,
+                performance: performanceMetrics
+            };
+
+            return result;
+
+        } finally {
+            await browser.close();
+        }
+    }
+
+    /**
      * Проверка страницы на всех устройствах профиля
      * Возвращает машиночитаемый JSON с actionable fixes
      * @param {string} url - URL для проверки

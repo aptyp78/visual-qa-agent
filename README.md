@@ -36,6 +36,7 @@ claude mcp add --transport stdio --scope user visual-qa node $(pwd)/src/mcp-serv
 - `mcp__visual-qa__visual_qa_devices` — список устройств
 - `mcp__visual-qa__visual_qa_audit_clickables` — аудит кликабельных элементов
 - `mcp__visual-qa__visual_qa_check_batch` — параллельная проверка нескольких URL
+- `mcp__visual-qa__visual_qa_console` — захват логов консоли браузера
 
 ## Быстрый старт (CLI)
 
@@ -122,6 +123,30 @@ visual-qa devices
 - Видимый focus indicator
 - Информация не только цветом
 - Поддержка prefers-reduced-motion
+
+## Консоль браузера (F12 DevTools)
+
+Агент умеет захватывать и анализировать логи консоли браузера:
+
+```bash
+# Отдельная проверка консоли
+mcp__visual-qa__visual_qa_console url="https://your-site.com"
+
+# Визуальная проверка + консоль
+mcp__visual-qa__visual_qa_check url="https://your-site.com" capture_console=true
+```
+
+### Что захватывается
+
+| Тип | Описание |
+|-----|----------|
+| **console.log/warn/error** | Все сообщения консоли |
+| **JS Errors** | Необработанные исключения (uncaught exceptions) |
+| **Network Errors** | Failed requests, 4xx/5xx responses |
+| **Security Warnings** | Mixed content, insecure resources |
+| **Performance Metrics** | FCP, Load time, Transfer size |
+
+JS ошибки и серверные ошибки (5xx) автоматически блокируют релиз.
 
 ## AI-анализ
 
@@ -234,6 +259,7 @@ src/
 - [x] Dark mode проверки
 - [x] Аудит кликабельных элементов
 - [x] Rate limiting и timeout для AI API
+- [x] Захват консоли браузера (JS ошибки, network failures)
 
 ## Лицензия
 

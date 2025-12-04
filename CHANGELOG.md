@@ -4,6 +4,29 @@
 
 Формат основан на [Keep a Changelog](https://keepachangelog.com/ru/1.0.0/).
 
+## [1.3.0] - 2025-12-05
+
+### Добавлено
+
+- **Захват консоли браузера (F12 DevTools)** — новый инструмент `visual_qa_console`:
+  - Перехват `console.log/warn/error/info` сообщений
+  - Отслеживание необработанных JavaScript ошибок (uncaught exceptions)
+  - Мониторинг сетевых ошибок (failed requests, 4xx/5xx responses)
+  - Security warnings (mixed content, insecure resources)
+  - Performance метрики (FCP, Load time, Transfer size)
+  - Deprecated API warnings
+
+- **Интеграция консоли в visual_qa_check** — новый параметр `capture_console`:
+  - JS ошибки автоматически добавляются как critical issues
+  - Сетевые ошибки (5xx) блокируют релиз
+  - Метрики производительности в отчёте
+  - Сводка консоли в JSON результатах
+
+### Улучшено
+
+- Структурированный отчёт с данными консоли в visual_qa_check
+- Machine-readable JSON теперь включает console_summary
+
 ## [1.2.0] - 2025-12-05
 
 ### Добавлено
