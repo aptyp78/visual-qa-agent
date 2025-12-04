@@ -39,6 +39,21 @@ export class HTMLReporter {
                     const filename = path.basename(check.screenshot);
                     await fs.copy(check.screenshot, path.join(screenshotsDir, filename));
                     check.screenshotRelative = `screenshots/${filename}`;
+
+                    // Копируем diff изображение если есть (для visual overlay)
+                    const diffPath = check.screenshot.replace('.png', '_diff.png');
+                    if (await fs.pathExists(diffPath)) {
+                        const diffFilename = filename.replace('.png', '_diff.png');
+                        await fs.copy(diffPath, path.join(screenshotsDir, diffFilename));
+                        check.diffRelative = `screenshots/${diffFilename}`;
+                    }
+
+                    // Копируем baseline изображение если есть
+                    if (check.baselinePath && await fs.pathExists(check.baselinePath)) {
+                        const baselineFilename = 'baseline_' + filename;
+                        await fs.copy(check.baselinePath, path.join(screenshotsDir, baselineFilename));
+                        check.baselineRelative = `screenshots/${baselineFilename}`;
+                    }
                 }
             }
         }
@@ -150,6 +165,33 @@ export class HTMLReporter {
         <span class="close">&times;</span>
     </div>
 
+    <!-- Diff Overlay Modal -->
+    <div id="diff-overlay" class="diff-overlay">
+        <span class="close" onclick="closeDiffOverlay()">&times;</span>
+        <div class="header">
+            <h3 id="diff-device-name">Устройство</h3>
+            <p id="diff-percent-info">Изменений: 0%</p>
+        </div>
+        <div class="diff-controls">
+            <button class="active" onclick="setDiffMode('slider')">🔄 Слайдер</button>
+            <button onclick="setDiffMode('diff')">🔴 Показать diff</button>
+            <button onclick="setDiffMode('current')">📱 Только текущий</button>
+            <button onclick="setDiffMode('baseline')">📋 Только baseline</button>
+        </div>
+        <div id="diff-compare-container" class="diff-compare-container slider-mode">
+            <img id="diff-img-baseline" class="img-baseline" src="" alt="Baseline">
+            <img id="diff-img-current" class="img-current" src="" alt="Current">
+            <img id="diff-img-diff" class="img-diff" src="" alt="Diff" style="display:none">
+            <div class="diff-labels">
+                <span>← Baseline</span>
+                <span>Текущий →</span>
+            </div>
+            <div id="diff-slider-line" class="diff-slider-line"></div>
+            <input type="range" id="diff-slider" class="diff-slider" min="0" max="100" value="50" oninput="updateDiffSlider(this.value)">
+            <input type="range" id="opacity-slider" class="opacity-slider" min="0" max="100" value="70" oninput="updateOpacity(this.value)" style="display:none">
+        </div>
+    </div>
+
     <script>
         ${this.getScripts()}
     </script>
@@ -173,17 +215,25 @@ export class HTMLReporter {
         const issues = check.detectedIssues || [];
         const issuesCount = issues.length || check.issues_count || 0;
 
+        // Проверяем наличие diff для visual overlay
+        const hasDiff = check.diffPercent !== undefined && check.comparison;
+        const diffScreenshot = check.screenshotRelative?.replace('.png', '_diff.png');
+        const baselineScreenshot = check.baselineRelative || '';
+
         return `
         <div class="check-card ${statusClass}" data-device="${check.device}" data-browser="${check.browser}">
             <div class="card-header">
                 <span class="status-icon">${statusIcon}</span>
                 <span class="device-name">${check.device || 'Unknown'}</span>
                 <span class="browser-badge">${check.browser || ''}</span>
+                ${hasDiff ? `<span class="diff-badge ${check.diffPercent > 1 ? 'high' : ''}">${check.diffPercent.toFixed(2)}% diff</span>` : ''}
             </div>
             ${check.screenshotRelative ? `
-            <div class="screenshot-wrapper" onclick="openLightbox('${check.screenshotRelative}')">
+            <div class="screenshot-wrapper ${hasDiff ? 'has-diff' : ''}"
+                 onclick="${hasDiff ? `openDiffOverlay('${check.screenshotRelative}', '${diffScreenshot}', '${baselineScreenshot}', '${check.device}', ${check.diffPercent || 0})` : `openLightbox('${check.screenshotRelative}')`}">
                 <img src="${check.screenshotRelative}" alt="${check.device}" loading="lazy">
-                <div class="overlay">🔍 Увеличить</div>
+                <div class="overlay">${hasDiff ? '🔄 Сравнить с baseline' : '🔍 Увеличить'}</div>
+                ${hasDiff ? `<div class="diff-indicator">${check.diffPercent > 1 ? '🔴' : '🟡'} ${check.diffPercent.toFixed(2)}% изменений</div>` : ''}
             </div>
             ` : ''}
             <div class="card-body">
@@ -518,6 +568,182 @@ export class HTMLReporter {
             color: white;
         }
 
+        /* === DIFF OVERLAY STYLES === */
+        .diff-badge {
+            font-size: 0.7rem;
+            background: var(--color-warning);
+            color: var(--bg-dark);
+            padding: 0.15rem 0.5rem;
+            border-radius: 0.25rem;
+            font-weight: 600;
+        }
+
+        .diff-badge.high {
+            background: var(--color-failed);
+            color: white;
+        }
+
+        .screenshot-wrapper.has-diff {
+            cursor: pointer;
+            border: 2px solid var(--color-warning);
+            border-radius: 0.5rem;
+        }
+
+        .diff-indicator {
+            position: absolute;
+            bottom: 0.5rem;
+            right: 0.5rem;
+            background: rgba(0,0,0,0.8);
+            padding: 0.25rem 0.5rem;
+            border-radius: 0.25rem;
+            font-size: 0.75rem;
+        }
+
+        /* Diff Overlay Modal */
+        .diff-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.95);
+            z-index: 1001;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 1rem;
+        }
+
+        .diff-overlay.active { display: flex; }
+
+        .diff-overlay .close {
+            position: absolute;
+            top: 1rem;
+            right: 1.5rem;
+            font-size: 2rem;
+            color: white;
+            cursor: pointer;
+            z-index: 10;
+        }
+
+        .diff-overlay .header {
+            color: white;
+            text-align: center;
+            margin-bottom: 1rem;
+        }
+
+        .diff-overlay .header h3 { margin-bottom: 0.5rem; }
+
+        .diff-controls {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 1rem;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+
+        .diff-controls button {
+            padding: 0.5rem 1rem;
+            border: 1px solid #555;
+            border-radius: 0.5rem;
+            background: #333;
+            color: white;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .diff-controls button.active {
+            background: var(--color-info);
+            border-color: var(--color-info);
+        }
+
+        .diff-controls button:hover { background: #444; }
+
+        .diff-compare-container {
+            position: relative;
+            max-width: 90vw;
+            max-height: 70vh;
+            overflow: hidden;
+            border-radius: 0.5rem;
+            background: #222;
+        }
+
+        .diff-compare-container img {
+            max-width: 100%;
+            max-height: 70vh;
+            object-fit: contain;
+            display: block;
+        }
+
+        /* Slider mode */
+        .diff-compare-container.slider-mode {
+            position: relative;
+        }
+
+        .diff-compare-container.slider-mode .img-current {
+            position: absolute;
+            top: 0;
+            left: 0;
+            clip-path: inset(0 0 0 50%);
+        }
+
+        .diff-slider {
+            position: absolute;
+            bottom: 1rem;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 80%;
+            z-index: 10;
+            accent-color: var(--color-info);
+        }
+
+        .diff-slider-line {
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            width: 2px;
+            background: var(--color-info);
+            left: 50%;
+            pointer-events: none;
+            z-index: 5;
+        }
+
+        .diff-labels {
+            position: absolute;
+            top: 0.5rem;
+            left: 0;
+            right: 0;
+            display: flex;
+            justify-content: space-between;
+            padding: 0 1rem;
+            pointer-events: none;
+            z-index: 5;
+        }
+
+        .diff-labels span {
+            background: rgba(0,0,0,0.7);
+            padding: 0.25rem 0.5rem;
+            border-radius: 0.25rem;
+            font-size: 0.75rem;
+            color: white;
+        }
+
+        /* Overlay mode - показываем diff изображение */
+        .diff-compare-container.overlay-mode .img-diff {
+            position: absolute;
+            top: 0;
+            left: 0;
+            opacity: 0.7;
+        }
+
+        .opacity-slider {
+            position: absolute;
+            bottom: 1rem;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 80%;
+            z-index: 10;
+            accent-color: var(--color-failed);
+        }
+
         @media (max-width: 768px) {
             body { padding: 1rem; }
             .checks-grid { grid-template-columns: 1fr; }
@@ -575,8 +801,102 @@ export class HTMLReporter {
             document.getElementById('lightbox').classList.remove('active');
         }
 
+        // === DIFF OVERLAY FUNCTIONS ===
+        let currentDiffMode = 'slider';
+
+        function openDiffOverlay(currentSrc, diffSrc, baselineSrc, deviceName, diffPercent) {
+            document.getElementById('diff-img-current').src = currentSrc;
+            document.getElementById('diff-img-diff').src = diffSrc || '';
+            document.getElementById('diff-img-baseline').src = baselineSrc || currentSrc.replace('/latest/', '/baseline/');
+            document.getElementById('diff-device-name').textContent = deviceName;
+            document.getElementById('diff-percent-info').textContent = 'Изменений: ' + diffPercent.toFixed(2) + '%';
+            document.getElementById('diff-overlay').classList.add('active');
+            setDiffMode('slider');
+        }
+
+        function closeDiffOverlay() {
+            document.getElementById('diff-overlay').classList.remove('active');
+        }
+
+        function setDiffMode(mode) {
+            currentDiffMode = mode;
+            const container = document.getElementById('diff-compare-container');
+            const baseline = document.getElementById('diff-img-baseline');
+            const current = document.getElementById('diff-img-current');
+            const diff = document.getElementById('diff-img-diff');
+            const slider = document.getElementById('diff-slider');
+            const opacitySlider = document.getElementById('opacity-slider');
+            const sliderLine = document.getElementById('diff-slider-line');
+            const labels = container.querySelector('.diff-labels');
+
+            // Убираем активный класс со всех кнопок
+            document.querySelectorAll('.diff-controls button').forEach(btn => btn.classList.remove('active'));
+            event.target.classList.add('active');
+
+            // Сбрасываем стили
+            container.className = 'diff-compare-container';
+            baseline.style.display = 'block';
+            current.style.display = 'block';
+            diff.style.display = 'none';
+            slider.style.display = 'none';
+            opacitySlider.style.display = 'none';
+            sliderLine.style.display = 'none';
+            labels.style.display = 'none';
+            current.style.position = '';
+            current.style.clipPath = '';
+            diff.style.position = '';
+            diff.style.opacity = '';
+
+            switch (mode) {
+                case 'slider':
+                    container.classList.add('slider-mode');
+                    current.style.position = 'absolute';
+                    current.style.top = '0';
+                    current.style.left = '0';
+                    slider.style.display = 'block';
+                    sliderLine.style.display = 'block';
+                    labels.style.display = 'flex';
+                    updateDiffSlider(50);
+                    break;
+                case 'diff':
+                    container.classList.add('overlay-mode');
+                    baseline.style.display = 'none';
+                    current.style.display = 'block';
+                    diff.style.display = 'block';
+                    diff.style.position = 'absolute';
+                    diff.style.top = '0';
+                    diff.style.left = '0';
+                    opacitySlider.style.display = 'block';
+                    updateOpacity(70);
+                    break;
+                case 'current':
+                    baseline.style.display = 'none';
+                    current.style.display = 'block';
+                    break;
+                case 'baseline':
+                    baseline.style.display = 'block';
+                    current.style.display = 'none';
+                    break;
+            }
+        }
+
+        function updateDiffSlider(value) {
+            const current = document.getElementById('diff-img-current');
+            const sliderLine = document.getElementById('diff-slider-line');
+            current.style.clipPath = 'inset(0 0 0 ' + value + '%)';
+            sliderLine.style.left = value + '%';
+        }
+
+        function updateOpacity(value) {
+            const diff = document.getElementById('diff-img-diff');
+            diff.style.opacity = value / 100;
+        }
+
         document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape') closeLightbox();
+            if (e.key === 'Escape') {
+                closeLightbox();
+                closeDiffOverlay();
+            }
         });
         `;
     }

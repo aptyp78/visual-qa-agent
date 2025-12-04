@@ -111,6 +111,11 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
                             description: 'Сравнить с baseline если существует',
                             default: false,
                         },
+                        check_dark_mode: {
+                            type: 'boolean',
+                            description: 'Также проверить в тёмном режиме (prefers-color-scheme: dark)',
+                            default: false,
+                        },
                     },
                     required: ['url'],
                 },
@@ -221,6 +226,38 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
                     required: ['url'],
                 },
             },
+            {
+                name: 'visual_qa_check_batch',
+                description: `Параллельная проверка нескольких URL страниц.
+
+Проверяет массив URL одновременно (до 3 параллельно для стабильности).
+Возвращает агрегированный отчёт по всем страницам.
+Полезно для проверки разных разделов сайта или A/B тестов.`,
+                inputSchema: {
+                    type: 'object',
+                    properties: {
+                        urls: {
+                            type: 'array',
+                            items: { type: 'string' },
+                            description: 'Массив URL страниц для проверки (максимум 10)',
+                            minItems: 1,
+                            maxItems: 10,
+                        },
+                        profile: {
+                            type: 'string',
+                            enum: ['quick', 'standard', 'comprehensive', 'mobile_first'],
+                            description: 'Профиль проверки (по умолчанию: quick для batch)',
+                            default: 'quick',
+                        },
+                        check_dark_mode: {
+                            type: 'boolean',
+                            description: 'Проверить также в тёмном режиме',
+                            default: false,
+                        },
+                    },
+                    required: ['urls'],
+                },
+            },
         ],
     };
 });
@@ -237,9 +274,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 const profile = args.profile || 'standard';
                 const aiAnalysis = args.ai_analysis || false;
                 const compareBaseline = args.compare_baseline || false;
+                const checkDarkMode = args.check_dark_mode || false;
 
                 // Проверка страницы (теперь возвращает структурированные issues с fix-ами)
-                const results = await agent.checkPage(url, { profile });
+                const results = await agent.checkPage(url, { profile, checkDarkMode });
 
                 // AI-анализ если включён
                 if (aiAnalysis) {
@@ -276,6 +314,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                                     const comparison = await comparator.compare(baselinePath, check.screenshot, diffPath);
                                     check.comparison = comparator.analyzeResults(comparison);
                                     check.diffPercent = comparison.diffPercent;
+                                    check.baselinePath = baselinePath; // Для visual diff overlay
                                 }
                             }
                         }
@@ -614,6 +653,129 @@ ${JSON.stringify(results, null, 2)}`,
                 } finally {
                     await browser.close();
                 }
+            }
+
+            case 'visual_qa_check_batch': {
+                const agent = await getAgent();
+                const urls = args.urls;
+                const profile = args.profile || 'quick';
+                const checkDarkMode = args.check_dark_mode || false;
+
+                // Ограничиваем до 10 URL
+                const urlsToCheck = urls.slice(0, 10);
+
+                // Функция для ограничения параллельности (semaphore pattern)
+                const CONCURRENCY = 3;
+                let running = 0;
+                const queue = [];
+
+                const runWithLimit = async (fn) => {
+                    while (running >= CONCURRENCY) {
+                        await new Promise(resolve => queue.push(resolve));
+                    }
+                    running++;
+                    try {
+                        return await fn();
+                    } finally {
+                        running--;
+                        if (queue.length > 0) {
+                            queue.shift()();
+                        }
+                    }
+                };
+
+                console.log(`🚀 Batch проверка ${urlsToCheck.length} URL (профиль: ${profile})...`);
+
+                // Запускаем проверки параллельно с ограничением
+                const resultsPromises = urlsToCheck.map((url, index) =>
+                    runWithLimit(async () => {
+                        console.log(`  [${index + 1}/${urlsToCheck.length}] Проверка ${url}...`);
+                        try {
+                            const result = await agent.checkPage(url, { profile, checkDarkMode });
+                            return { url, status: 'success', result };
+                        } catch (error) {
+                            console.error(`    ✗ Ошибка для ${url}: ${error.message}`);
+                            return { url, status: 'error', error: error.message };
+                        }
+                    })
+                );
+
+                const batchResults = await Promise.all(resultsPromises);
+
+                // Агрегируем результаты
+                const aggregated = {
+                    total_urls: urlsToCheck.length,
+                    successful: batchResults.filter(r => r.status === 'success').length,
+                    failed: batchResults.filter(r => r.status === 'error').length,
+                    profile,
+                    check_dark_mode: checkDarkMode,
+                    timestamp: new Date().toISOString(),
+                    summary: {
+                        total_checks: 0,
+                        passed: 0,
+                        failed: 0,
+                        warnings: 0,
+                        total_issues: 0,
+                        blocks_release: false
+                    },
+                    pages: batchResults
+                };
+
+                // Суммируем статистику
+                for (const pageResult of batchResults) {
+                    if (pageResult.status === 'success' && pageResult.result) {
+                        const s = pageResult.result.summary;
+                        aggregated.summary.total_checks += s.total || 0;
+                        aggregated.summary.passed += s.passed || 0;
+                        aggregated.summary.failed += s.failed || 0;
+                        aggregated.summary.warnings += s.warnings || 0;
+                        aggregated.summary.total_issues += (pageResult.result.issues?.length || 0);
+                        if (s.blocks_release) aggregated.summary.blocks_release = true;
+                    }
+                }
+
+                // Формируем текстовый отчёт
+                let output = `## 📊 Batch проверка завершена
+
+**Всего URL:** ${aggregated.total_urls}
+**Успешно:** ${aggregated.successful}
+**Ошибок:** ${aggregated.failed}
+**Профиль:** ${profile}
+${checkDarkMode ? '**Dark Mode:** включён' : ''}
+
+### Общая статистика
+| Метрика | Значение |
+|---------|----------|
+| Всего проверок | ${aggregated.summary.total_checks} |
+| ✅ Пройдено | ${aggregated.summary.passed} |
+| ❌ Ошибок | ${aggregated.summary.failed} |
+| ⚠️ Предупреждений | ${aggregated.summary.warnings} |
+| 📋 Найдено проблем | ${aggregated.summary.total_issues} |
+| 🛑 Блокирует релиз | ${aggregated.summary.blocks_release ? 'Да' : 'Нет'} |
+
+### Результаты по страницам
+`;
+
+                for (const page of batchResults) {
+                    if (page.status === 'success') {
+                        const s = page.result.summary;
+                        const statusIcon = s.blocks_release ? '🛑' :
+                                          s.failed > 0 ? '❌' :
+                                          s.warnings > 0 ? '⚠️' : '✅';
+                        output += `\n#### ${statusIcon} ${page.url}\n`;
+                        output += `- Проверок: ${s.total}, Пройдено: ${s.passed}, Ошибок: ${s.failed}\n`;
+                        output += `- Проблем найдено: ${page.result.issues?.length || 0}\n`;
+                    } else {
+                        output += `\n#### ⚡ ${page.url}\n`;
+                        output += `- **Ошибка:** ${page.error}\n`;
+                    }
+                }
+
+                output += `\n---\n**Машиночитаемый JSON:**\n\`\`\`json\n${JSON.stringify(aggregated, null, 2)}\n\`\`\``;
+
+                return {
+                    content: [{ type: 'text', text: output }],
+                };
             }
 
             default:

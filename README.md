@@ -35,6 +35,7 @@ claude mcp add --transport stdio --scope user visual-qa node $(pwd)/src/mcp-serv
 - `mcp__visual-qa__visual_qa_analyze` — AI-анализ
 - `mcp__visual-qa__visual_qa_devices` — список устройств
 - `mcp__visual-qa__visual_qa_audit_clickables` — аудит кликабельных элементов
+- `mcp__visual-qa__visual_qa_check_batch` — параллельная проверка нескольких URL
 
 ## Быстрый старт (CLI)
 
@@ -209,14 +210,28 @@ src/
     └── helpers.js             # Общие утилиты
 ```
 
+## MCP Resources
+
+Помимо инструментов, агент предоставляет ресурсы для чтения данных:
+
+| Resource URI | Описание |
+|--------------|----------|
+| `visual-qa://reports/latest` | JSON-данные последней проверки |
+| `visual-qa://config/standards` | Текущие настройки стандартов качества |
+
+Пример использования в Claude Code:
+```
+Покажи результаты последней проверки из visual-qa://reports/latest
+```
+
 ## Roadmap
 
 - [ ] Интеграция с Percy/Chromatic для облачного хранения
-- [ ] Visual diff overlay в отчёте
+- [x] Visual diff overlay в отчёте
 - [ ] Slack/Teams уведомления
-- [ ] Параллельный запуск на нескольких URL
+- [x] Параллельный запуск на нескольких URL
 - [ ] Запись видео при ошибках
-- [ ] Dark mode проверки
+- [x] Dark mode проверки
 - [x] Аудит кликабельных элементов
 - [x] Rate limiting и timeout для AI API
 

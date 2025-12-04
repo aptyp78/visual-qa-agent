@@ -96,8 +96,9 @@ export class VisualQAAgent {
     /**
      * Захват скриншота страницы
      * @param {boolean} keepOpen - не закрывать браузер (для дальнейшего анализа)
+     * @param {string} colorScheme - цветовая схема: 'light', 'dark', 'no-preference'
      */
-    async captureScreenshot(url, device, browserType = 'chromium', keepOpen = false) {
+    async captureScreenshot(url, device, browserType = 'chromium', keepOpen = false, colorScheme = 'light') {
         // Валидация URL
         validateUrl(url);
 
@@ -108,7 +109,8 @@ export class VisualQAAgent {
             deviceScaleFactor: device.device_scale_factor || 1,
             isMobile: device.is_mobile || false,
             hasTouch: device.has_touch || false,
-            userAgent: device.user_agent
+            userAgent: device.user_agent,
+            colorScheme: colorScheme // Эмуляция prefers-color-scheme
         };
 
         const context = await browser.newContext(contextOptions);
@@ -157,10 +159,17 @@ export class VisualQAAgent {
     /**
      * Проверка страницы на всех устройствах профиля
      * Возвращает машиночитаемый JSON с actionable fixes
+     * @param {string} url - URL для проверки
+     * @param {Object} options - опции проверки
+     * @param {string} options.profile - профиль устройств
+     * @param {boolean} options.checkDarkMode - проверять также в тёмном режиме
      */
     async checkPage(url, options = {}) {
-        const { profile = 'standard', saveBaseline = false } = options;
+        const { profile = 'standard', saveBaseline = false, checkDarkMode = false } = options;
         const { devices, browsers } = this.getDevicesForProfile(profile);
+
+        // Режимы для проверки
+        const colorSchemes = checkDarkMode ? ['light', 'dark'] : ['light'];
 
         // Все найденные проблемы со всех устройств
         const allIssues = [];
@@ -181,74 +190,96 @@ export class VisualQAAgent {
             action_summary: null // Сводка для агента
         };
 
-        for (const browserType of browsers) {
-            for (const device of devices) {
-                console.log(`  📱 ${device.name} (${browserType})...`);
+        for (const colorScheme of colorSchemes) {
+            const schemeLabel = colorScheme === 'dark' ? '🌙' : '☀️';
 
-                let browser = null;
-                try {
-                    // Захватываем с keepOpen=true для анализа
-                    const { screenshot, metadata, page, browser: br } = await this.captureScreenshot(
-                        url, device, browserType, true
-                    );
-                    browser = br;
+            for (const browserType of browsers) {
+                for (const device of devices) {
+                    console.log(`  ${schemeLabel} 📱 ${device.name} (${browserType}, ${colorScheme})...`);
 
-                    const checkId = `${device.id}_${browserType}`;
-                    const screenshotPath = path.join(
-                        this.reportsPath,
-                        'screenshots',
-                        `${checkId}_${Date.now()}.png`
-                    );
+                    let browser = null;
+                    try {
+                        // Захватываем с keepOpen=true для анализа
+                        const { screenshot, metadata, page, browser: br } = await this.captureScreenshot(
+                            url, device, browserType, true, colorScheme
+                        );
+                        browser = br;
 
-                    await fs.ensureDir(path.dirname(screenshotPath));
-                    await fs.writeFile(screenshotPath, screenshot);
+                        // Добавляем colorScheme в metadata
+                        metadata.colorScheme = colorScheme;
 
-                    // Детектируем проблемы через IssueDetector (пока page открыт!)
-                    const detectedIssues = await this.issueDetector.detectIssues(page, device, metadata);
-                    allIssues.push(...detectedIssues);
+                        const schemeSuffix = colorScheme === 'dark' ? '_dark' : '';
+                        const checkId = `${device.id}_${browserType}${schemeSuffix}`;
+                        const screenshotPath = path.join(
+                            this.reportsPath,
+                            'screenshots',
+                            `${checkId}_${Date.now()}.png`
+                        );
 
-                    // Базовые проверки
-                    const checkResults = await this.runChecks(screenshot, metadata, device);
+                        await fs.ensureDir(path.dirname(screenshotPath));
+                        await fs.writeFile(screenshotPath, screenshot);
 
-                    // Определяем статус на основе найденных проблем
-                    const hasCritical = detectedIssues.some(i => i.severity === 'critical');
-                    const hasWarnings = detectedIssues.some(i => i.severity === 'warning');
+                        // Детектируем проблемы через IssueDetector (пока page открыт!)
+                        const detectedIssues = await this.issueDetector.detectIssues(page, device, metadata);
 
-                    let status = 'passed';
-                    if (hasCritical) status = 'failed';
-                    else if (hasWarnings) status = 'warning';
+                        // Помечаем проблемы как относящиеся к dark mode
+                        if (colorScheme === 'dark') {
+                            detectedIssues.forEach(issue => {
+                                issue.colorScheme = 'dark';
+                                issue.title = `[Dark Mode] ${issue.title}`;
+                            });
+                        }
 
-                    results.checks.push({
-                        device: device.name,
-                        device_id: device.id,
-                        browser: browserType,
-                        viewport: device.viewport,
-                        is_mobile: device.is_mobile || false,
-                        screenshot: screenshotPath,
-                        status,
-                        issues_count: detectedIssues.length,
-                        ...checkResults
-                    });
+                        allIssues.push(...detectedIssues);
 
-                    results.summary.total++;
-                    if (status === 'passed') results.summary.passed++;
-                    else if (status === 'failed') results.summary.failed++;
-                    else results.summary.warnings++;
+                        // Базовые проверки
+                        const checkResults = await this.runChecks(screenshot, metadata, device);
 
-                } catch (error) {
-                    console.error(`    ✗ Ошибка: ${error.message}`);
-                    results.checks.push({
-                        device: device.name,
-                        device_id: device.id,
-                        browser: browserType,
-                        status: 'error',
-                        error: error.message
-                    });
-                    results.summary.failed++;
-                } finally {
-                    // Закрываем браузер после анализа
-                    if (browser) {
-                        await browser.close();
+                        // Определяем статус на основе найденных проблем
+                        const hasCritical = detectedIssues.some(i => i.severity === 'critical');
+                        const hasWarnings = detectedIssues.some(i => i.severity === 'warning');
+
+                        let status = 'passed';
+                        if (hasCritical) status = 'failed';
+                        else if (hasWarnings) status = 'warning';
+
+                        const deviceLabel = colorScheme === 'dark' ? `${device.name} (Dark)` : device.name;
+
+                        results.checks.push({
+                            device: deviceLabel,
+                            device_id: device.id,
+                            browser: browserType,
+                            viewport: device.viewport,
+                            is_mobile: device.is_mobile || false,
+                            colorScheme: colorScheme,
+                            screenshot: screenshotPath,
+                            status,
+                            issues_count: detectedIssues.length,
+                            ...checkResults
+                        });
+
+                        results.summary.total++;
+                        if (status === 'passed') results.summary.passed++;
+                        else if (status === 'failed') results.summary.failed++;
+                        else results.summary.warnings++;
+
+                    } catch (error) {
+                        console.error(`    ✗ Ошибка: ${error.message}`);
+                        const deviceLabel = colorScheme === 'dark' ? `${device.name} (Dark)` : device.name;
+                        results.checks.push({
+                            device: deviceLabel,
+                            device_id: device.id,
+                            browser: browserType,
+                            colorScheme: colorScheme,
+                            status: 'error',
+                            error: error.message
+                        });
+                        results.summary.failed++;
+                    } finally {
+                        // Закрываем браузер после анализа
+                        if (browser) {
+                            await browser.close();
+                        }
                     }
                 }
             }
