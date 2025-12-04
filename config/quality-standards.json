@@ -1,0 +1,155 @@
+{
+  "$schema": "./quality-standards.schema.json",
+  "version": "1.0.0",
+  "description": "Стандарты качества визуальной проверки веб-интерфейсов",
+
+  "visual_regression": {
+    "threshold": {
+      "pixel_diff_percent": 0.1,
+      "color_tolerance": 5,
+      "anti_aliasing_tolerance": 2,
+      "description": "Допустимое отклонение в пикселях (0.1% = почти идентичны)"
+    },
+    "ignore_regions": {
+      "dynamic_content": true,
+      "timestamps": true,
+      "ads": true,
+      "description": "Области, которые исключаются из сравнения"
+    }
+  },
+
+  "layout_checks": {
+    "overflow": {
+      "enabled": true,
+      "severity": "critical",
+      "description": "Проверка на вылезание элементов за границы"
+    },
+    "overlap": {
+      "enabled": true,
+      "severity": "critical",
+      "description": "Проверка на наложение элементов друг на друга"
+    },
+    "alignment": {
+      "enabled": true,
+      "tolerance_px": 2,
+      "severity": "warning",
+      "description": "Проверка выравнивания элементов"
+    },
+    "spacing": {
+      "enabled": true,
+      "min_spacing_px": 8,
+      "severity": "warning",
+      "description": "Минимальные отступы между элементами"
+    }
+  },
+
+  "typography": {
+    "min_font_size": {
+      "mobile": 14,
+      "tablet": 14,
+      "desktop": 12,
+      "unit": "px",
+      "severity": "warning"
+    },
+    "line_height": {
+      "min_ratio": 1.2,
+      "max_ratio": 2.0,
+      "severity": "info"
+    },
+    "contrast_ratio": {
+      "aa_normal": 4.5,
+      "aa_large": 3.0,
+      "aaa_normal": 7.0,
+      "aaa_large": 4.5,
+      "severity": "critical"
+    }
+  },
+
+  "responsiveness": {
+    "breakpoints": {
+      "mobile_s": 320,
+      "mobile_m": 375,
+      "mobile_l": 425,
+      "tablet": 768,
+      "laptop": 1024,
+      "laptop_l": 1440,
+      "desktop_4k": 2560
+    },
+    "horizontal_scroll": {
+      "allowed": false,
+      "severity": "critical"
+    },
+    "touch_targets": {
+      "min_size_px": 44,
+      "severity": "warning",
+      "description": "Минимальный размер кликабельных элементов для touch-устройств"
+    }
+  },
+
+  "accessibility": {
+    "wcag_level": "AA",
+    "checks": {
+      "alt_text": {
+        "enabled": true,
+        "severity": "critical"
+      },
+      "focus_visible": {
+        "enabled": true,
+        "severity": "critical"
+      },
+      "color_only_info": {
+        "enabled": true,
+        "severity": "warning",
+        "description": "Информация не должна передаваться только цветом"
+      },
+      "motion_reduced": {
+        "enabled": true,
+        "severity": "info",
+        "description": "Поддержка prefers-reduced-motion"
+      }
+    }
+  },
+
+  "performance_visual": {
+    "largest_contentful_paint": {
+      "good": 2500,
+      "needs_improvement": 4000,
+      "unit": "ms"
+    },
+    "cumulative_layout_shift": {
+      "good": 0.1,
+      "needs_improvement": 0.25
+    },
+    "first_contentful_paint": {
+      "good": 1800,
+      "needs_improvement": 3000,
+      "unit": "ms"
+    }
+  },
+
+  "cross_browser": {
+    "required_browsers": ["chromium", "firefox", "webkit"],
+    "tolerance": {
+      "rendering_diff_percent": 1.0,
+      "font_rendering_tolerance": 3
+    }
+  },
+
+  "severity_levels": {
+    "critical": {
+      "blocks_release": true,
+      "auto_fail": true,
+      "description": "Критические ошибки - релиз невозможен"
+    },
+    "warning": {
+      "blocks_release": false,
+      "requires_review": true,
+      "description": "Предупреждения - требуют ревью"
+    },
+    "info": {
+      "blocks_release": false,
+      "requires_review": false,
+      "description": "Информационные сообщения"
+    }
+  }
+}

@@ -1,0 +1,182 @@
+{
+  "$schema": "./devices.schema.json",
+  "version": "1.0.0",
+  "description": "Конфигурация устройств для тестирования",
+
+  "device_profiles": {
+    "mobile": {
+      "iphone_se": {
+        "name": "iPhone SE",
+        "viewport": {"width": 375, "height": 667},
+        "device_scale_factor": 2,
+        "is_mobile": true,
+        "has_touch": true,
+        "user_agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
+      },
+      "iphone_14_pro": {
+        "name": "iPhone 14 Pro",
+        "viewport": {"width": 393, "height": 852},
+        "device_scale_factor": 3,
+        "is_mobile": true,
+        "has_touch": true,
+        "user_agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
+      },
+      "iphone_15_pro_max": {
+        "name": "iPhone 15 Pro Max",
+        "viewport": {"width": 430, "height": 932},
+        "device_scale_factor": 3,
+        "is_mobile": true,
+        "has_touch": true,
+        "user_agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1"
+      },
+      "pixel_7": {
+        "name": "Google Pixel 7",
+        "viewport": {"width": 412, "height": 915},
+        "device_scale_factor": 2.625,
+        "is_mobile": true,
+        "has_touch": true,
+        "user_agent": "Mozilla/5.0 (Linux; Android 14; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
+      },
+      "samsung_galaxy_s23": {
+        "name": "Samsung Galaxy S23",
+        "viewport": {"width": 360, "height": 780},
+        "device_scale_factor": 3,
+        "is_mobile": true,
+        "has_touch": true,
+        "user_agent": "Mozilla/5.0 (Linux; Android 14; SM-S911B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
+      }
+    },
+
+    "tablet": {
+      "ipad_mini": {
+        "name": "iPad Mini",
+        "viewport": {"width": 768, "height": 1024},
+        "device_scale_factor": 2,
+        "is_mobile": true,
+        "has_touch": true,
+        "user_agent": "Mozilla/5.0 (iPad; CPU OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
+      },
+      "ipad_pro_11": {
+        "name": "iPad Pro 11\"",
+        "viewport": {"width": 834, "height": 1194},
+        "device_scale_factor": 2,
+        "is_mobile": true,
+        "has_touch": true,
+        "user_agent": "Mozilla/5.0 (iPad; CPU OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
+      },
+      "ipad_pro_12_9": {
+        "name": "iPad Pro 12.9\"",
+        "viewport": {"width": 1024, "height": 1366},
+        "device_scale_factor": 2,
+        "is_mobile": true,
+        "has_touch": true,
+        "user_agent": "Mozilla/5.0 (iPad; CPU OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
+      },
+      "galaxy_tab_s8": {
+        "name": "Samsung Galaxy Tab S8",
+        "viewport": {"width": 800, "height": 1280},
+        "device_scale_factor": 2,
+        "is_mobile": true,
+        "has_touch": true,
+        "user_agent": "Mozilla/5.0 (Linux; Android 14; SM-X700) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+      }
+    },
+
+    "desktop": {
+      "laptop_hd": {
+        "name": "Laptop HD",
+        "viewport": {"width": 1366, "height": 768},
+        "device_scale_factor": 1,
+        "is_mobile": false,
+        "has_touch": false
+      },
+      "laptop_full_hd": {
+        "name": "Laptop Full HD",
+        "viewport": {"width": 1920, "height": 1080},
+        "device_scale_factor": 1,
+        "is_mobile": false,
+        "has_touch": false
+      },
+      "macbook_air_13": {
+        "name": "MacBook Air 13\"",
+        "viewport": {"width": 1440, "height": 900},
+        "device_scale_factor": 2,
+        "is_mobile": false,
+        "has_touch": false
+      },
+      "macbook_pro_14": {
+        "name": "MacBook Pro 14\"",
+        "viewport": {"width": 1512, "height": 982},
+        "device_scale_factor": 2,
+        "is_mobile": false,
+        "has_touch": false
+      },
+      "imac_24": {
+        "name": "iMac 24\"",
+        "viewport": {"width": 2240, "height": 1260},
+        "device_scale_factor": 2,
+        "is_mobile": false,
+        "has_touch": false
+      },
+      "desktop_4k": {
+        "name": "Desktop 4K",
+        "viewport": {"width": 2560, "height": 1440},
+        "device_scale_factor": 1.5,
+        "is_mobile": false,
+        "has_touch": false
+      },
+      "ultrawide": {
+        "name": "Ultrawide Monitor",
+        "viewport": {"width": 3440, "height": 1440},
+        "device_scale_factor": 1,
+        "is_mobile": false,
+        "has_touch": false
+      }
+    }
+  },
+
+  "test_profiles": {
+    "quick": {
+      "description": "Быстрая проверка - основные размеры",
+      "devices": ["iphone_14_pro", "ipad_pro_11", "laptop_full_hd"],
+      "browsers": ["chromium"]
+    },
+    "standard": {
+      "description": "Стандартная проверка - популярные устройства",
+      "devices": [
+        "iphone_se", "iphone_14_pro", "pixel_7",
+        "ipad_mini", "ipad_pro_11",
+        "laptop_hd", "laptop_full_hd", "macbook_pro_14"
+      ],
+      "browsers": ["chromium", "firefox"]
+    },
+    "comprehensive": {
+      "description": "Полная проверка - все устройства и браузеры",
+      "devices": "all",
+      "browsers": ["chromium", "firefox", "webkit"]
+    },
+    "mobile_first": {
+      "description": "Приоритет мобильных устройств",
+      "devices": [
+        "iphone_se", "iphone_14_pro", "iphone_15_pro_max",
+        "pixel_7", "samsung_galaxy_s23",
+        "ipad_mini", "ipad_pro_11"
+      ],
+      "browsers": ["webkit", "chromium"]
+    }
+  },
+
+  "orientations": {
+    "mobile": ["portrait", "landscape"],
+    "tablet": ["portrait", "landscape"],
+    "desktop": ["landscape"]
+  },
+
+  "color_schemes": ["light", "dark"],
+
+  "accessibility_modes": {
+    "reduced_motion": true,
+    "high_contrast": true,
+    "forced_colors": true
+  }
+}
